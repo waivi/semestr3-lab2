@@ -1,13 +1,172 @@
 #include <iostream>
-#include <unordered_set>
 #include <string>
 #include <cctype>
+#include <vector>
 
 using namespace std;
 
+// Узел хеш-таблицы
+struct HashNode {
+    string key;
+    HashNode* next;
+
+    HashNode(const string& k) : key(k), next(nullptr) {}
+};
+
+// Простая хеш-функция для строк
+size_t stringHash(const string& str, size_t tableSize) {
+    size_t hash = 5381; //метод djb2 с этим числом
+    for (char c : str) {
+        hash = ((hash << 5) + hash) + c; // hash * 33 + c
+    }
+    return hash % tableSize;
+}
+
+// Собственная реализация множества на основе хеш-таблицы
+class CustomSet {
+private:
+    vector<HashNode*> table;
+    size_t capacity;
+    size_t size_;
+
+    // Рехеширование при необходимости (уменьшает коллизии)
+    void rehash() {
+        size_t newCapacity = capacity * 2;
+        vector<HashNode*> newTable(newCapacity, nullptr);
+
+        // Перехеширование всех элементов
+        for (size_t i = 0; i < capacity; ++i) {
+            HashNode* node = table[i];
+            while (node != nullptr) {
+                HashNode* next = node->next;
+                size_t newIndex = stringHash(node->key, newCapacity);
+
+                // Вставка в новую таблицу в начало цепочки
+                node->next = newTable[newIndex]; //привязываем к существующей цепочке
+                newTable[newIndex] = node;//делаем ноду началом цеочки
+
+                node = next;
+            }
+        }
+
+        table = move(newTable); //передаём данные владения без копирования
+        capacity = newCapacity;
+    }
+
+public:
+    CustomSet(size_t initialCapacity = 16) : capacity(initialCapacity), size_(0) {
+        table.resize(capacity, nullptr);
+    }
+
+    ~CustomSet() {
+        clear();
+    }
+
+    // Очистка множества
+    void clear() {
+        for (size_t i = 0; i < capacity; ++i) {
+            HashNode* node = table[i];
+            while (node != nullptr) {
+                HashNode* next = node->next;
+                delete node;
+                node = next;
+            }
+            table[i] = nullptr;
+        }
+        size_ = 0;
+    }
+
+    // Вставка элемента
+    bool insert(const string& key) {
+        // Рехеширование при коэффициенте загрузки > 0.75
+        if (size_ >= capacity * 0.75) {
+            rehash();
+        }
+
+        size_t index = stringHash(key, capacity);
+        HashNode* node = table[index];
+
+        // Проверка на существование элемента
+        while (node != nullptr) {
+            if (node->key == key) {
+                return false; // Элемент уже существует
+            }
+            node = node->next;
+        }
+
+        // Вставка нового элемента в начало цепочки
+        HashNode* newNode = new HashNode(key);
+        newNode->next = table[index];
+        table[index] = newNode;
+        size_++;
+
+        return true;
+    }
+
+    // Удаление элемента
+    bool erase(const string& key) {
+        size_t index = stringHash(key, capacity);
+        HashNode* node = table[index];
+        HashNode* prev = nullptr;
+
+        while (node != nullptr) {
+            if (node->key == key) {
+                if (prev == nullptr) {
+                    // Удаление из начала цепочки
+                    table[index] = node->next;
+                }
+                else {
+                    // Удаление из середины/конца цепочки
+                    prev->next = node->next;
+                }
+                delete node;
+                size_--;
+                return true;
+            }
+            prev = node;
+            node = node->next;
+        }
+
+        return false; // Элемент не найден
+    }
+
+    // Поиск элемента
+    bool find(const string& key) const {
+        size_t index = stringHash(key, capacity);
+        HashNode* node = table[index];
+
+        while (node != nullptr) {
+            if (node->key == key) {
+                return true;
+            }
+            node = node->next;
+        }
+
+        return false;
+    }
+
+    // Получение размера множества
+    size_t size() const {
+        return size_;
+    }
+
+    // Получение всех элементов (для сохранения в файл)
+    vector<string> getAllElements() const {
+        vector<string> elements;
+        for (size_t i = 0; i < capacity; ++i) {
+            HashNode* node = table[i];
+            while (node != nullptr) {
+                elements.push_back(node->key);
+                node = node->next;
+            }
+        }
+        return elements;
+    }
+};
+
 class SetManager {
 private:
-    unordered_set<string> data;
+    CustomSet data;
 
 public:
     SetManager() = default;
@@ -19,7 +178,7 @@ public:
 
     // Дополнительный метод для проверки наличия элемента (без вывода)
     bool contains(const string& element) const {
-        return data.find(element) != data.end();
+        return data.find(element);
     }
 
     // Метод для очистки множества
@@ -28,16 +187,17 @@ public:
     }
 
     // Метод для добавления нескольких элементов
-    void addAll(const unordered_set<string>& elements) {
-        for (const auto& element : elements) {
+    void addAll(const CustomSet& elements) {
+        vector<string> allElements = elements.getAllElements();
+        for (const auto& element : allElements) {
             data.insert(element);
         }
     }
 };
 
 // Функция для получения всех пар соседних оснований из строки
-unordered_set<string> getAllPairs(const string& genome) {
-    unordered_set<string> pairs;
+CustomSet getAllPairs(const string& genome) {
+    CustomSet pairs;
 
     for (size_t i = 0; i < genome.length() - 1; ++i) {
         string pair = genome.substr(i, 2);
@@ -101,10 +261,11 @@ int main() {
     setManager.clear(); // Очищаем множество
 
     // Получаем все уникальные пары из второго генома
-    unordered_set<string> pairs2 = getAllPairs(genome2);
+    CustomSet pairs2 = getAllPairs(genome2);
 
     // Добавляем все пары в SetManager
-    for (const auto& pair : pairs2) {
+    vector<string> allPairs = pairs2.getAllElements();
+    for (const auto& pair : allPairs) {
         setManager.SETADD(pair);
     }
 
